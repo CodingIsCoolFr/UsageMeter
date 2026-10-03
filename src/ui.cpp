@@ -443,6 +443,14 @@ void start_ui(AppState& app) {
     HWND native = glfwGetWin32Window(window);
     BOOL use_dark = TRUE;
     DwmSetWindowAttribute(native, 20, &use_dark, sizeof(use_dark));
+    // Match the client background (#121212) so the caption is not a separate bar.
+    COLORREF caption = 0x00121212;
+    COLORREF text = 0x00E8E8E8;
+    int backdrop_none = 1;
+    DwmSetWindowAttribute(native, 34, &caption, sizeof(caption));
+    DwmSetWindowAttribute(native, 35, &caption, sizeof(caption));
+    DwmSetWindowAttribute(native, 36, &text, sizeof(text));
+    DwmSetWindowAttribute(native, 38, &backdrop_none, sizeof(backdrop_none));
 
     bool pinned = false;
     {
