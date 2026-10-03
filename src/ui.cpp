@@ -2,22 +2,26 @@
 
 #include "jsonutil.hpp"
 
+#include <GLFW/glfw3.h>
+#ifdef _WIN32
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
 #include <windows.h>
 #include <shellapi.h>
-
-#define GLFW_EXPOSE_NATIVE_WIN32
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
+#include <dwmapi.h>
+#endif
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 
-#include <dwmapi.h>
-
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <ctime>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 #include <map>
 #include <thread>
 
@@ -361,7 +365,19 @@ void claude_dialog(AppState& app, PasteFlow& flow, bool& flow_ready) {
         flow_ready = true;
     }
     if (ImGui::Button("Open browser", ImVec2(140, 0))) {
+    #ifdef _WIN32
         ShellExecuteA(nullptr, "open", flow.url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    #else
+        pid_t pid = fork();
+        if (pid == 0) {
+    #ifdef __APPLE__
+            execlp("open", "open", flow.url.c_str(), static_cast<char*>(nullptr));
+    #else
+            execlp("xdg-open", "xdg-open", flow.url.c_str(), static_cast<char*>(nullptr));
+    #endif
+            _exit(127);
+        }
+    #endif
     }
     ImGui::Spacing();
     ImGui::TextDisabled("Paste the code");
@@ -433,17 +449,28 @@ void load_saved_views(AppState& app) {
 
 void start_ui(AppState& app) {
     glfwInit();
+    const char* glsl_version = "#version 130";
+#ifdef __APPLE__
+    // macOS only accepts a 3.2+ core profile.
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+    glsl_version = "#version 150";
+#else
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+#endif
     glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
     GLFWwindow* window = glfwCreateWindow(560, 760, "UsageMeter", nullptr, nullptr);
+    if (!window) return;
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
 
+#ifdef _WIN32
     HWND native = glfwGetWin32Window(window);
     BOOL use_dark = TRUE;
     DwmSetWindowAttribute(native, 20, &use_dark, sizeof(use_dark));
-    // Match the client background (#121212) so the caption is not a separate bar.
     COLORREF caption = 0x00121212;
     COLORREF text = 0x00E8E8E8;
     int backdrop_none = 1;
@@ -451,6 +478,7 @@ void start_ui(AppState& app) {
     DwmSetWindowAttribute(native, 35, &caption, sizeof(caption));
     DwmSetWindowAttribute(native, 36, &text, sizeof(text));
     DwmSetWindowAttribute(native, 38, &backdrop_none, sizeof(backdrop_none));
+#endif
 
     bool pinned = false;
     {
@@ -468,13 +496,17 @@ void start_ui(AppState& app) {
     float scale = 1.0f;
     glfwGetWindowContentScale(window, &scale, nullptr);
     io.FontGlobalScale = 1.0f;
-    ImFont* font = io.Fonts->AddFontFromFileTTF("C:/Windows/Fonts/segoeui.ttf", 18.0f * scale);
+    const char* font_file = "C:/Windows/Fonts/segoeui.ttf";
+#ifdef __APPLE__
+    font_file = "/System/Library/Fonts/Supplemental/Arial.ttf";
+#endif
+    ImFont* font = io.Fonts->AddFontFromFileTTF(font_file, 18.0f * scale);
     if (!font) io.Fonts->AddFontDefault();
     ImGui::GetStyle().ScaleAllSizes(scale);
 
     apply_theme();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 130");
+    ImGui_ImplOpenGL3_Init(glsl_version);
 
     refresh_all(app);
 

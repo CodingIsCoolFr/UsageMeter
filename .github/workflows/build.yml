@@ -1,0 +1,130 @@
+name: Build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install vcpkg packages
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git
+          .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          .\vcpkg\vcpkg install imgui[glfw-binding,opengl3-binding] curl nlohmann-json glfw3 --triplet x64-windows
+      - name: Build
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE="$pwd\vcpkg\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
+          cmake --build build --config Release
+          New-Item -ItemType Directory -Force dist\windows | Out-Null
+          Copy-Item build\Release\UsageMeter.exe,build\Release\glfw3.dll,build\Release\libcurl.dll,build\Release\z.dll dist\windows
+      - name: Installer
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: installer/UsageMeter.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/UsageMeter-Setup.exe
+            dist/windows/*
+      - name: Add Windows installer to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.ref_name }}" dist/UsageMeter-Setup.exe --clobber
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install vcpkg packages
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git
+          ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          ./vcpkg/vcpkg install imgui[glfw-binding,opengl3-binding] curl nlohmann-json glfw3 --triplet arm64-osx
+      - name: Build app
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=arm64-osx
+          cmake --build build --config Release
+          BIN=$(find build -type f -name UsageMeter ! -name '*.dSYM' | head -1)
+          test -n "$BIN"
+          APP="dist/UsageMeter.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks"
+          cp "$BIN" "$APP/Contents/MacOS/UsageMeter"
+          cat > "$APP/Contents/Info.plist" << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>UsageMeter</string>
+            <key>CFBundleDisplayName</key><string>UsageMeter</string>
+            <key>CFBundleIdentifier</key><string>fr.codingiscool.UsageMeter</string>
+            <key>CFBundleVersion</key><string>1.0.0</string>
+            <key>CFBundleShortVersionString</key><string>1.0.0</string>
+            <key>CFBundleExecutable</key><string>UsageMeter</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          EOF
+          python3 - << 'PY'
+          import os, shutil, subprocess
+          app = "dist/UsageMeter.app"
+          fw = os.path.join(app, "Contents", "Frameworks")
+          exe = os.path.join(app, "Contents", "MacOS", "UsageMeter")
+          search = ["vcpkg/installed/arm64-osx/lib", "/opt/homebrew/lib", "/usr/local/lib"]
+          seen = set()
+          def resolve(lib):
+              if os.path.isfile(lib):
+                  return lib
+              base = os.path.basename(lib)
+              for root in search:
+                  cand = os.path.join(root, base)
+                  if os.path.isfile(cand):
+                      return cand
+              return None
+          def listed(path):
+              out = subprocess.check_output(["otool", "-L", path], text=True)
+              libs = []
+              for line in out.splitlines()[1:]:
+                  lib = line.strip().split()[0]
+                  if lib.startswith("/usr/lib/") or lib.startswith("/System/") or lib.startswith("@"):
+                      if lib.startswith("@rpath/") or lib.startswith("@loader_path/"):
+                          libs.append(lib)
+                      continue
+                  libs.append(lib)
+              return libs
+          queue = [exe]
+          while queue:
+              path = queue.pop()
+              for lib in listed(path):
+                  src = resolve(lib)
+                  if not src:
+                      continue
+                  base = os.path.basename(src)
+                  dest = os.path.join(fw, base)
+                  if base not in seen:
+                      shutil.copy2(src, dest)
+                      os.chmod(dest, 0o755)
+                      subprocess.check_call(["install_name_tool", "-id", f"@executable_path/../Frameworks/{base}", dest])
+                      seen.add(base)
+                      queue.append(dest)
+                  subprocess.check_call(["install_name_tool", "-change", lib, f"@executable_path/../Frameworks/{base}", path])
+          PY
+          chmod +x "$APP/Contents/MacOS/UsageMeter"
+          codesign --force --deep --sign - "$APP"
+          ditto -c -k --keepParent "$APP" dist/UsageMeter-macOS-arm64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/UsageMeter-macOS-arm64.zip
+      - name: Add Mac build to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.ref_name }}" dist/UsageMeter-macOS-arm64.zip --clobber

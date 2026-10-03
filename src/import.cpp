@@ -1,11 +1,15 @@
 #include "providers.hpp"
 
-#include <windows.h>
-
 #include <ctime>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <cstdlib>
+#endif
 
 namespace {
 
@@ -43,10 +47,16 @@ long long iso_to_unix(const std::string& iso) {
     tm.tm_hour = h;
     tm.tm_min = mi;
     tm.tm_sec = s;
+#ifdef _WIN32
     return static_cast<long long>(_mkgmtime(&tm));
+#else
+    return static_cast<long long>(timegm(&tm));
+#endif
 }
 
-std::string capture(const std::wstring& cmdline) {
+std::string capture(const std::string& cmdline) {
+#ifdef _WIN32
+    std::wstring wide(cmdline.begin(), cmdline.end());
     SECURITY_ATTRIBUTES sa{};
     sa.nLength = sizeof(sa);
     sa.bInheritHandle = TRUE;
@@ -61,8 +71,7 @@ std::string capture(const std::wstring& cmdline) {
     si.hStdError = write;
     si.wShowWindow = SW_HIDE;
     PROCESS_INFORMATION pi{};
-    std::wstring cmd = cmdline;
-    if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+    if (!CreateProcessW(nullptr, wide.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
         CloseHandle(read);
         CloseHandle(write);
         return {};
@@ -76,12 +85,25 @@ std::string capture(const std::wstring& cmdline) {
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     CloseHandle(read);
+#else
+    FILE* pipe = popen(cmdline.c_str(), "r");
+    if (!pipe) return {};
+    std::string out;
+    char buf[512];
+    while (fgets(buf, sizeof(buf), pipe)) out += buf;
+    pclose(pipe);
+#endif
     while (!out.empty() && (out.back() == '\n' || out.back() == '\r' || out.back() == ' ')) out.pop_back();
     return out;
 }
 
 nlohmann::json grok_from_hermes() {
+#ifdef _WIN32
     auto path = env_path("LOCALAPPDATA", "\\hermes\\auth.json");
+#else
+    auto path = env_path("HOME", "/.hermes/auth.json");
+    if (path.empty() || !std::ifstream(path)) path = env_path("HOME", "/Library/Application Support/hermes/auth.json");
+#endif
     auto root = read_json(path);
     if (!root.is_object()) return {};
 const nlohmann::json* tokens = nullptr;
@@ -104,7 +126,11 @@ const nlohmann::json* tokens = nullptr;
 }
 
 nlohmann::json codex_from_file() {
+#ifdef _WIN32
     auto path = env_path("USERPROFILE", "\\.codex\\auth.json");
+#else
+    auto path = env_path("HOME", "/.codex/auth.json");
+#endif
     auto root = read_json(path);
     if (!root.is_object() || !root.contains("tokens") || !root["tokens"].is_object()) return {};
     const auto& tokens = root["tokens"];
@@ -117,10 +143,16 @@ nlohmann::json codex_from_file() {
 }
 
 nlohmann::json github_from_cli() {
+#ifdef _WIN32
     wchar_t gh[MAX_PATH];
     if (!SearchPathW(nullptr, L"gh.exe", nullptr, MAX_PATH, gh, nullptr)) return {};
-    std::wstring cmd = L"\"" + std::wstring(gh) + L"\" auth token";
-    std::string token = capture(cmd);
+    int bytes = WideCharToMultiByte(CP_UTF8, 0, gh, -1, nullptr, 0, nullptr, nullptr);
+    std::string path(bytes > 0 ? bytes - 1 : 0, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, gh, -1, path.data(), bytes, nullptr, nullptr);
+    std::string token = capture("\"" + path + "\" auth token");
+#else
+    std::string token = capture("gh auth token 2>/dev/null");
+#endif
     if (token.size() < 8 || token.find(' ') != std::string::npos) return {};
     return {{"provider", "github"}, {"kind", "gh"}, {"source", "gh"}, {"token", token}};
 }

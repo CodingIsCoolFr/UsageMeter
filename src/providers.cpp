@@ -3,16 +3,35 @@
 #include "http.hpp"
 #include "jsonutil.hpp"
 
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <sstream>
+#include <thread>
+
+#ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <shellapi.h>
-
-#include <algorithm>
-#include <chrono>
-#include <ctime>
-#include <sstream>
-#include <thread>
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <unistd.h>
+using SOCKET = int;
+#ifndef INVALID_SOCKET
+#define INVALID_SOCKET (-1)
+#endif
+#define closesocket ::close
+#endif
 
 namespace {
 
@@ -43,7 +62,20 @@ std::string form(std::initializer_list<std::pair<const char*, std::string>> fiel
 }
 
 void open_browser(const std::string& url) {
+#ifdef _WIN32
     ShellExecuteA(nullptr, "open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#else
+    // argv, not a shell: authorize URLs contain '&'.
+    pid_t pid = fork();
+    if (pid == 0) {
+#ifdef __APPLE__
+        execlp("open", "open", url.c_str(), static_cast<char*>(nullptr));
+#else
+        execlp("xdg-open", "xdg-open", url.c_str(), static_cast<char*>(nullptr));
+#endif
+        _exit(127);
+    }
+#endif
 }
 
 std::string json_error(const HttpResponse& res, const char* what) {
@@ -74,8 +106,13 @@ std::string json_error(const HttpResponse& res, const char* what) {
 std::string recv_some(SOCKET s) {
     std::string data;
     char buf[4096];
+#ifdef _WIN32
     DWORD wait = 2000;
     setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<char*>(&wait), sizeof(wait));
+#else
+    timeval wait{2, 0};
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &wait, sizeof(wait));
+#endif
     for (;;) {
         int n = recv(s, buf, sizeof(buf), 0);
         if (n <= 0) break;
@@ -115,16 +152,18 @@ std::string query_param(const std::string& request, const std::string& key) {
 OAuthResult oauth_loopback(const std::string& authorize_url, const std::string& redirect_host, int port,
                            const std::string& redirect_path, const std::string& expected_state, int timeout_s) {
     OAuthResult result;
+#ifdef _WIN32
     WSADATA wsa{};
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
         result.error = "WSAStartup failed";
         return result;
     }
+#endif
 
     SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(static_cast<u_short>(port));
+    addr.sin_port = htons(static_cast<uint16_t>(port));
     inet_pton(AF_INET, redirect_host.c_str(), &addr.sin_addr);
     int reuse = 1;
     setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<char*>(&reuse), sizeof(reuse));
@@ -145,7 +184,11 @@ OAuthResult oauth_loopback(const std::string& authorize_url, const std::string& 
         FD_ZERO(&fds);
         FD_SET(listener, &fds);
         timeval tv{static_cast<long>(left > 5 ? 5 : left), 0};
+#ifdef _WIN32
         if (select(0, &fds, nullptr, nullptr, &tv) <= 0) continue;
+#else
+        if (select(static_cast<int>(listener) + 1, &fds, nullptr, nullptr, &tv) <= 0) continue;
+#endif
 
         SOCKET client = accept(listener, nullptr, nullptr);
         if (client == INVALID_SOCKET) continue;

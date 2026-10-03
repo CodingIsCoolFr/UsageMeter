@@ -1,6 +1,6 @@
 # UsageMeter
 
-A small Windows window for the limits that actually matter: what is left, and when it comes back.
+A small desktop window for the limits that actually matter: what is left, and when it comes back.
 
 It stays out of the way. Dark, quiet, and able to sit on top of whatever you are working in.
 
@@ -14,13 +14,20 @@ It stays out of the way. Dark, quiet, and able to sit on top of whatever you are
 
 The reset clocks tick every second. The bars refresh on their own, slowly enough that the providers do not rate-limit the check. If one of them does, the last good numbers stay on screen.
 
+## Download
+
+The latest builds are on the [releases page](https://github.com/CodingIsCoolFr/UsageMeter/releases/latest).
+
+- **Windows:** run `UsageMeter-Setup.exe`. It installs the app and can put a shortcut on the desktop.
+- **Mac (Apple Silicon):** download `UsageMeter-macOS-arm64.zip`, unzip, and open `UsageMeter.app`. The first time, right-click it and choose Open — it is not signed with an Apple developer account.
+
 ## Using it
 
-Open `UsageMeter.exe`. Accounts already signed in on this PC are picked up. Claude can be added from the window; it opens the browser and finishes the sign-in itself.
+Open the app. Accounts already signed in on this PC are picked up. Claude can be added from the window; it opens the browser and finishes the sign-in itself.
 
 **Pin** keeps the window above other apps. **Unpin** lets it sit normally. That choice is remembered.
 
-Tokens never leave the machine. They are stored with Windows DPAPI under `%APPDATA%\UsageMeter`, readable only by your Windows user.
+Tokens never leave the machine. On Windows they are stored with DPAPI under `%APPDATA%\UsageMeter`. On Mac they go in the login Keychain, not in a readable file.
 
 ## Build
 

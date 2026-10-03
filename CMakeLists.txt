@@ -1,8 +1,13 @@
 cmake_minimum_required(VERSION 3.21)
 
-set(VCPKG_TARGET_TRIPLET x64-windows)
-set(CMAKE_TOOLCHAIN_FILE "$ENV{USERPROFILE}/vcpkg/scripts/buildsystems/vcpkg.cmake"
-    CACHE STRING "" FORCE)
+if(NOT CMAKE_TOOLCHAIN_FILE AND DEFINED ENV{USERPROFILE})
+    if(EXISTS "$ENV{USERPROFILE}/vcpkg/scripts/buildsystems/vcpkg.cmake")
+        set(CMAKE_TOOLCHAIN_FILE "$ENV{USERPROFILE}/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+    endif()
+endif()
+if(WIN32)
+    set(VCPKG_TARGET_TRIPLET x64-windows CACHE STRING "")
+endif()
 
 project(UsageMeter LANGUAGES CXX)
 
@@ -15,14 +20,15 @@ find_package(OpenGL REQUIRED)
 find_package(CURL REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
-add_executable(UsageMeter WIN32
-    src/main.cpp
-    src/http.cpp
-    src/jsonutil.cpp
-    src/store.cpp
-    src/providers.cpp
-    src/import.cpp
-    src/ui.cpp)
+set(SOURCES
+    src/main.cpp src/http.cpp src/jsonutil.cpp src/store.cpp
+    src/providers.cpp src/import.cpp src/ui.cpp)
+
+if(WIN32)
+    add_executable(UsageMeter WIN32 ${SOURCES})
+else()
+    add_executable(UsageMeter ${SOURCES})
+endif()
 
 target_include_directories(UsageMeter PRIVATE src)
 
@@ -31,12 +37,14 @@ target_link_libraries(UsageMeter PRIVATE
     glfw
     OpenGL::GL
     CURL::libcurl
-    nlohmann_json::nlohmann_json
-    crypt32
-    bcrypt
-    shell32
-    ws2_32
-    dwmapi)
+    nlohmann_json::nlohmann_json)
+
+if(WIN32)
+    target_link_libraries(UsageMeter PRIVATE crypt32 bcrypt shell32 ws2_32 dwmapi)
+endif()
+if(APPLE)
+    target_link_libraries(UsageMeter PRIVATE "-framework Cocoa" "-framework IOKit" "-framework CoreFoundation" "-framework Security")
+endif()
 
 if(MSVC)
     target_compile_options(UsageMeter PRIVATE /W3 /utf-8 /DUNICODE /D_UNICODE /DNOMINMAX)

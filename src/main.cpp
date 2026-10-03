@@ -1,12 +1,11 @@
 #include "store.hpp"
 #include "ui.hpp"
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-
 #include <algorithm>
 
-int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+namespace {
+
+int run() {
     AppState app(default_store_path());
     app.store.load();
     if (!app.store.data().contains("accounts") || !app.store.data()["accounts"].is_array())
@@ -27,3 +26,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     start_ui(app);
     return 0;
 }
+
+}  // namespace
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) { return run(); }
+#else
+int main() { return run(); }
+#endif
