@@ -834,7 +834,11 @@ AccountView refresh_github(nlohmann::json& account) {
             if (reset > 0) {
                 std::time_t when = static_cast<std::time_t>(reset);
                 std::tm local{};
+#ifdef _WIN32
                 localtime_s(&local, &when);
+#else
+                localtime_r(&when, &local);
+#endif
                 char buf[64];
                 strftime(buf, sizeof(buf), "resets %I:%M %p", &local);
                 m.detail = buf;
@@ -856,7 +860,11 @@ std::string iso_from_unix(long long unix_s) {
     if (unix_s <= 0) return {};
     std::time_t when = static_cast<std::time_t>(unix_s);
     std::tm tm{};
+#ifdef _WIN32
     if (gmtime_s(&tm, &when) != 0) return {};
+#else
+    if (!gmtime_r(&when, &tm)) return {};
+#endif
     char buf[40];
     if (strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm) == 0) return {};
     return buf;

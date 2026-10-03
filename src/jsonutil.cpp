@@ -3,6 +3,10 @@
 #include <cctype>
 #include <ctime>
 
+#ifndef _WIN32
+#include <cstdlib>
+#endif
+
 std::optional<double> json_number(const nlohmann::json& j, const char* key) {
     if (!j.is_object() || !j.contains(key) || j[key].is_null()) return std::nullopt;
     const auto& v = j[key];
@@ -49,7 +53,11 @@ bool parse_iso(const std::string& iso, std::time_t& out) {
             offset_min = (oh * 60 + om) * (iso[pos] == '-' ? -1 : 1);
         }
     }
+#ifdef _WIN32
     out = _mkgmtime(&tm) - offset_min * 60;
+#else
+    out = timegm(&tm) - offset_min * 60;
+#endif
     return out > 0;
 }
 
@@ -77,7 +85,11 @@ std::string format_local(const std::string& iso8601) {
     std::time_t when = 0;
     if (!parse_iso(iso8601, when)) return {};
     std::tm local{};
+#ifdef _WIN32
     if (localtime_s(&local, &when) != 0) return {};
+#else
+    if (!localtime_r(&when, &local)) return {};
+#endif
     char buf[64];
     // %-I is a glibc flag. MSVC's strftime treats it as an invalid parameter and
     // abort()s the process, so the fallback below it never ran — that is what
