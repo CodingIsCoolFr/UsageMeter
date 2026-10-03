@@ -728,6 +728,42 @@ AccountView refresh_github(nlohmann::json& account) {
         }
     }
 
+    HttpRequest copilot = who;
+    copilot.url = "https://api.github.com/copilot_internal/user";
+    auto cop = http_request(copilot);
+    if (cop.status == 200) {
+        try {
+            auto j = nlohmann::json::parse(cop.body);
+            std::string plan = j.value("copilot_plan", "");
+            if (!plan.empty()) {
+                if (!plan.empty() && plan[0] >= 'a' && plan[0] <= 'z') plan[0] = static_cast<char>(plan[0] - 32);
+                view.plan = "Copilot " + plan;
+            }
+            std::string reset = j.value("quota_reset_date_utc", "");
+            const auto* snaps = j.contains("quota_snapshots") ? &j["quota_snapshots"] : nullptr;
+            auto add_quota = [&](const char* key, const char* label) {
+                if (!snaps || !snaps->contains(key) || !(*snaps)[key].is_object()) return;
+                const auto& q = (*snaps)[key];
+                auto entitlement = json_number(q, "entitlement");
+                if (!entitlement || *entitlement <= 0) return;
+                Meter m;
+                m.label = label;
+                if (auto left = json_number(q, "percent_remaining"))
+                    m.used_pct = std::max(0.0, std::min(100.0, 100.0 - *left));
+                m.resets_at = reset;
+                auto remaining = json_number(q, "remaining");
+                char buf[64];
+                snprintf(buf, sizeof(buf), "%.0f of %.0f left", remaining ? *remaining : 0, *entitlement);
+                m.detail = buf;
+                view.meters.push_back(m);
+            };
+            add_quota("chat", "Chat");
+            add_quota("completions", "Completions");
+            add_quota("premium_interactions", "Premium");
+        } catch (...) {
+        }
+    }
+
     HttpRequest req;
     req.url = "https://api.github.com/rate_limit";
     req.headers = who.headers;
@@ -898,7 +934,7 @@ const std::vector<Provider>& providers() {
         Provider{"codex", "Codex", "ChatGPT session and weekly limits from the Codex login on this PC.", nullptr,
                  refresh_codex},
         Provider{"openai", "OpenAI", "API spend for the last 30 days, from an admin key.", nullptr, refresh_openai},
-        Provider{"github", "GitHub", "REST, search and GraphQL rate limits from the gh login on this PC.", nullptr,
+        Provider{"github", "GitHub", "Copilot chat and completion quota, plus REST limits, from the gh login on this PC.", nullptr,
                  refresh_github},
     };
     return all;

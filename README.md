@@ -10,7 +10,7 @@ It stays out of the way. Dark, quiet, and able to sit on top of whatever you are
 | --- | --- |
 | Claude | Session limit and weekly limit, with the reset clock |
 | Grok | SuperGrok weekly pool, per-product share, monthly allowance |
-| GitHub | REST, search, and GraphQL rate limits for the `gh` login on this PC |
+| GitHub | Copilot chat and completion quota from the `gh` login, plus REST limits |
 
 The reset clocks tick every second. The bars refresh on their own, slowly enough that the providers do not rate-limit the check. If one of them does, the last good numbers stay on screen.
 
